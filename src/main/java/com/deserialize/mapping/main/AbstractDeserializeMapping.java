@@ -3,6 +3,7 @@ package com.deserialize.mapping.main;
 import com.deserialize.mapping.exception.InvalidCastException;
 import com.deserialize.mapping.exception.InvalidPropertyException;
 import com.deserialize.mapping.exception.UnhandledMethodException;
+import com.deserialize.mapping.utils.FileUtils;
 import com.deserialize.mapping.utils.TimeUtils;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.DeserializationContext;
@@ -12,8 +13,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.util.Assert;
-import org.springframework.util.ResourceUtils;
 
 import java.beans.IntrospectionException;
 import java.beans.PropertyDescriptor;
@@ -26,19 +25,19 @@ import java.lang.reflect.Modifier;
 import java.lang.reflect.ParameterizedType;
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.net.URISyntaxException;
 import java.text.ParseException;
 import java.time.*;
 import java.util.*;
 
-import static com.deserialize.mapping.utils.StringUtils.defaultIfBlank;
-import static com.deserialize.mapping.utils.StringUtils.isNotBlank;
+import static com.deserialize.mapping.utils.StringUtils.*;
 
 
 // TODO Gesytione di Array di array di array ( o liste di liste di liste )
 public abstract class AbstractDeserializeMapping<T> extends StdDeserializer<T> {
 
-    private static Logger logger = LoggerFactory.getLogger(AbstractDeserializeMapping.class);
-    private static ObjectMapper mapper = new ObjectMapper();
+    private final Logger logger = LoggerFactory.getLogger(AbstractDeserializeMapping.class);
+    private final ObjectMapper mapper = new ObjectMapper();
 
     private Class<T> klass;
     private JsonNode mapping;
@@ -64,7 +63,7 @@ public abstract class AbstractDeserializeMapping<T> extends StdDeserializer<T> {
     /**
      * custom class' costructor
      */
-    protected AbstractDeserializeMapping(Class<T> klass, String mappingFilePath, AbstractDeserializeMappingPathType mappingPathType) throws IOException {
+    protected AbstractDeserializeMapping(Class<T> klass, String mappingFilePath, AbstractDeserializeMappingPathType mappingPathType) throws IOException, URISyntaxException {
         super(klass);
         this.klass = klass;
 
@@ -78,7 +77,7 @@ public abstract class AbstractDeserializeMapping<T> extends StdDeserializer<T> {
         // Configuration inside java class
         if (isNotBlank(mappingFilePath) && mappingPathType != null) {
             String resourceLocation = mappingPathType.getName() + mappingFilePath + (!mappingFilePath.endsWith(File.separator) ? File.separator : "") + (!mappingFilePath.endsWith(fileExtension) ? fileExtension : "");
-            mapping = mapper.readTree(ResourceUtils.getFile(resourceLocation));
+            mapping = mapper.readTree(FileUtils.getFile(resourceLocation));
 
             if (isLogEnabled(LoggerLevel.DEBUG)) {
                 logger.debug("Read file at path '{}'", resourceLocation);
@@ -89,7 +88,7 @@ public abstract class AbstractDeserializeMapping<T> extends StdDeserializer<T> {
             String prefix = defaultIfBlank(deserializeProperties.getPrefix());
 
             String resourceLocation = pathType.getName() + path + (!path.endsWith(File.separator) ? File.separator : "") + prefix + this.klass.getSimpleName().toLowerCase() + (!this.klass.getSimpleName().toLowerCase().endsWith(fileExtension) ? fileExtension : "");
-            mapping = mapper.readTree(ResourceUtils.getFile(resourceLocation));
+            mapping = mapper.readTree(FileUtils.getFile(resourceLocation));
 
             if (isLogEnabled(LoggerLevel.DEBUG)) {
                 logger.debug("Read file at path '{}'", resourceLocation);
@@ -102,7 +101,6 @@ public abstract class AbstractDeserializeMapping<T> extends StdDeserializer<T> {
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public T deserialize(JsonParser jsonParser, DeserializationContext deserializationContext) throws IOException {
 
         if (mapping == null) {
@@ -132,7 +130,7 @@ public abstract class AbstractDeserializeMapping<T> extends StdDeserializer<T> {
                 logger.debug("Start deserialization for class '{}' with json: '{}'", klass.getName(), inputNodeAsString);
             }
 
-            obj = (T) deserialize(obj, inputNode, mapping);
+            deserialize(obj, inputNode, mapping);
 
             if (inputNodeAsString != null) {
                 logger.debug("End deserialization for class '{}' with json: '{}'", klass.getName(), inputNodeAsString);
@@ -280,7 +278,7 @@ public abstract class AbstractDeserializeMapping<T> extends StdDeserializer<T> {
                                 }
                             }
 
-                            Collection collection = (Collection) collectionClass.newInstance();
+                            Collection<Object> collection = (Collection) collectionClass.newInstance();
 
                             if (isLogEnabled(LoggerLevel.DEBUG)) {
                                 logger.debug("Detect collection '{}' with element class '{}' and size '{}'", collectionClass.getSimpleName(), elementClass.getSimpleName(), currentNode.getValue().size());
@@ -384,7 +382,7 @@ public abstract class AbstractDeserializeMapping<T> extends StdDeserializer<T> {
     private Object getValueFromNode(JsonNode jsonNode, Class<?> classToCast) throws ParseException, InvalidCastException {
 
         if (jsonNode.isObject()) {
-            throw new InvalidCastException(String.format("Input node is an object '%s'. Cannot be cast to class '%s'", jsonNode.toString(), classToCast.getName()));
+            throw new InvalidCastException(String.format("Input node is an object '%s'. Cannot be cast to class '%s'", jsonNode, classToCast.getName()));
         }
 
         if (jsonNode.isNull()) {
@@ -447,7 +445,7 @@ public abstract class AbstractDeserializeMapping<T> extends StdDeserializer<T> {
 
         if (classToCast.equals(Date.class)) {
             try {
-                return TimeUtils.getDate(Long.valueOf(stringValue));
+                return TimeUtils.getDate(Long.parseLong(stringValue));
             } catch (NumberFormatException e) {
                 // do nothing
             }
@@ -456,7 +454,7 @@ public abstract class AbstractDeserializeMapping<T> extends StdDeserializer<T> {
 
         if (classToCast.equals(Instant.class)) {
             try {
-                return TimeUtils.getInstant(Long.valueOf(stringValue.replace(".", "")));
+                return TimeUtils.getInstant(Long.parseLong(stringValue.replace(".", "")));
             } catch (NumberFormatException e) {
                 // do nothing
             }
@@ -465,7 +463,7 @@ public abstract class AbstractDeserializeMapping<T> extends StdDeserializer<T> {
 
         if (classToCast.equals(Calendar.class)) {
             try {
-                return TimeUtils.getCalendar(Long.valueOf(stringValue));
+                return TimeUtils.getCalendar(Long.parseLong(stringValue));
             } catch (NumberFormatException e) {
                 // do nothing
             }
@@ -474,7 +472,7 @@ public abstract class AbstractDeserializeMapping<T> extends StdDeserializer<T> {
 
         if (classToCast.equals(LocalDate.class)) {
             try {
-                return TimeUtils.getLocalDate(Long.valueOf(stringValue));
+                return TimeUtils.getLocalDate(Long.parseLong(stringValue));
             } catch (NumberFormatException e) {
                 // do nothing
             }
@@ -486,7 +484,7 @@ public abstract class AbstractDeserializeMapping<T> extends StdDeserializer<T> {
 
         if (classToCast.equals(LocalDateTime.class)) {
             try {
-                return TimeUtils.getLocalDateTime(Long.valueOf(stringValue));
+                return TimeUtils.getLocalDateTime(Long.parseLong(stringValue));
             } catch (NumberFormatException e) {
                 // do nothing
             }
@@ -498,7 +496,7 @@ public abstract class AbstractDeserializeMapping<T> extends StdDeserializer<T> {
 
         if (classToCast.equals(ZonedDateTime.class)) {
             try {
-                return ZonedDateTime.ofInstant(Instant.ofEpochMilli(Long.valueOf(stringValue)), ZoneOffset.UTC);
+                return ZonedDateTime.ofInstant(Instant.ofEpochMilli(Long.parseLong(stringValue)), ZoneOffset.UTC);
             } catch (NumberFormatException e) {
                 // do nothing
             }
@@ -524,14 +522,16 @@ public abstract class AbstractDeserializeMapping<T> extends StdDeserializer<T> {
      */
     private DeserializeProperties getProperties(String className) {
 
-        Assert.notNull(className, "className cannot be blank");
+        if (isBlank(className)) {
+            throw new RuntimeException("className cannot be blank");
+        }
 
         DeserializeProperties properties = new DeserializeProperties();
         Properties applicationProperties = new Properties();
 
         try {
-            applicationProperties.load(new FileInputStream(ResourceUtils.getFile("classpath:application.properties")));
-        } catch (IOException e) {
+            applicationProperties.load(new FileInputStream(FileUtils.getFile("classpath:application.properties")));
+        } catch (IOException | URISyntaxException e) {
             if (isLogEnabled(LoggerLevel.ERROR)) {
                 logger.error(e.getLocalizedMessage(), e);
             }
